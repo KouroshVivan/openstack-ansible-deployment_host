@@ -1,0 +1,12 @@
+---
+# tasks file for openstack-ansible-deployment_host
+
+# CONFIGURE OS
+- include: centos.yml
+  when: ansible_distribution == "CentOS"
+
+- include: ubuntu.yml
+  when: ansible_distribution == "Ubuntu"
+
+# INSTALL OPENSTACK ANSIBLE SOURCE
+- include: setup.yml

@@ -1,0 +1,204 @@
+---
+
+cidr_networks:
+  container: "{{ networks.mgmt.cidr }}"
+  storage: "{{ networks.storage.cidr }}"
+  tunnel: "{{ networks.vxlan.cidr }}"
+{% if "lbaas" in networks %}
+  lbaas: "{{ networks.lbaas.cidr }}"
+{% endif %}
+{% if "dbaas" in networks %}
+  dbaas: "{{ networks.dbaas.cidr }}"
+{% endif %}
+{% if "swift_repl" in networks %}
+  swift_replication: "{{ networks.swift_repl.cidr }}"
+{% endif %}
+{% if "ceph_repl" in networks %}
+  ceph_replication: "{{ networks.ceph_repl.cidr }}"
+{% endif %}
+
+used_ips:
+{% for used_ip in networks.used_ips.maas %}
+  - "{{ used_ip }}"
+{% endfor %}
+
+global_overrides:
+  internal_lb_vip_address: TODO
+  external_lb_vip_address: TODO
+  management_bridge: "br-mgmt"
+  provider_networks:
+    - network:
+        container_bridge: "br-mgmt"
+        container_type: "veth"
+        container_interface: "eth1"
+        ip_from_q: "container"
+        type: "raw"
+        group_binds:
+          - all_containers
+          - hosts
+        is_container_address: true
+        is_ssh_address: true
+{% if "lbaas" in networks %}
+    - network:
+        container_bridge: "br-lbaas"
+        container_type: "veth"
+        container_interface: "eth14"
+        ip_from_q: "lbaas"
+        type: "raw"
+        net_name: "octavia"
+        group_binds:
+          - octavia-worker
+          - octavia-housekeeping
+          - octavia-health-manager
+{% endif %}
+{% if "dbaas" in networks %}
+    - network:
+        container_bridge: "br-dbaas"
+        container_type: "veth"
+        container_interface: "eth15"
+        ip_from_q: "dbaas"
+        type: "raw"
+        net_name: "dbaas-mgmt"
+        group_binds:
+          - trove_api_container
+          - trove_taskmanager
+          - trove_conductor
+{% endif %}
+{% if "swift_repl" in networks %}
+    - network:
+        container_bridge: "br-swift_repl"
+        container_type: "veth"
+        container_interface: "eth10"
+        ip_from_q: "swift_replication"
+        type: "raw"
+        net_name: "swift_repl"
+        group_binds:
+          - swift_proxy
+{% endif %}
+{% if "ceph_repl" in networks %}
+    - network:
+        container_bridge: "br-ceph_repl"
+        container_type: "veth"
+        container_interface: "eth10"
+        ip_from_q: "ceph_replication"
+        type: "raw"
+        net_name: "ceph_repl"
+        group_binds:
+          - ceph-osd
+          - ceph-mon
+{% endif %}
+    - network:
+        container_bridge: "br-vxlan"
+        container_type: "veth"
+        container_interface: "eth10"
+        ip_from_q: "tunnel"
+        type: "vxlan"
+        range: "{{ provider_networks.br_vxlan.range }}"
+        net_name: "vxlan"
+        group_binds:
+          - neutron_openvswitch_agent
+    - network:
+        container_bridge: "br-admin"
+        container_type: "veth"
+        container_interface: "eth12"
+        type: "vlan"
+        range: "{{ provider_networks.br_vrack.range }}"
+        net_name: "ext-net"
+        group_binds:
+          - neutron_openvswitch_agent
+    - network:
+        container_bridge: "br-storage"
+        container_type: "veth"
+        container_interface: "eth2"
+        ip_from_q: "storage"
+        type: "raw"
+        group_binds:
+          - ceph-osd
+          - ceph-mon
+          - cinder_api
+          - cinder_volume
+          - glance_api
+          - nova_compute
+          - swift_proxy
+
+{% for group in groups %}
+{%- if groups[group] and group not in ['all', 'osa', 'osa-deplhost'] %}
+{% for host in groups[group] %}
+{% if 'ansible_hostname' in hostvars[host] and 'ansible_host' in hostvars[host] %}
+{% if loop.first %}
+{{ group }}:
+{% endif %}
+  {{ hostvars[host]['ansible_hostname'] }}:
+    ip: {{ hostvars[host]['ansible_host'] }}
+    container_vars:
+{% if 'storage_hosts' == group %}
+      cinder_backends:
+        limit_container_types: cinder_volume
+{% if 'ceph-osd_hosts' in hostvars[host]['group_names'] %}
+        volumes_ceph:
+          volume_driver: cinder.volume.drivers.rbd.RBDDriver
+          rbd_pool: volumes
+          rbd_ceph_conf: /etc/ceph/ceph.conf
+          rbd_flatten_volume_from_snapshot: 'false'
+          rbd_max_clone_depth: 5
+          rbd_store_chunk_size: 4
+          rados_connect_timeout: -1
+          volume_backend_name: volumes_ceph
+{%- raw %}
+          rbd_user: "{{ cinder_ceph_client }}"
+          rbd_secret_uuid: "{{ cinder_ceph_client_uuid }}"
+{% endraw %}
+{% endif %}
+{% for drive in hostvars[host]['rotary_available'] %}
+{% for tag in drive.tags %}
+{% if 'localvolume' in tag %}
+        {{ tag }}:
+          volume_backend_name: volumes_local
+          volume_driver: cinder.volume.drivers.lvm.LVMVolumeDriver
+          volume_group: {{ tag }}
+{%- raw %}
+          iscsi_ip_address: "{{ cinder_storage_address }}"
+{% endraw %}
+{% endif %}
+{% endfor %}
+{% endfor %}
+      cinder_storage_availability_zone: {{ env }}-1
+      cinder_default_availability_zone: {{ env }}-1
+{% endif %}
+{%- if 'ceph-mon_hosts' == group %}
+      affinity:
+        ceph_mon_container: 3
+{% endif %}
+{%- if 'ceph-osd_hosts' == group %}
+      affinity:
+        ceph_osd_container: 3
+      devices:
+{% for drive in hostvars[host]['ssd_available'] %}
+        - /dev/{{ drive.name }}
+{% endfor %}
+{% for drive in hostvars[host]['rotary_available'] %}
+        - /dev/{{ drive.name }}
+{% endfor %}
+      dedicated_devices:
+{% for drive in hostvars[host]['ssd_available'] %}
+        - /dev/{{ drive.name }}
+{% endfor %}
+{% for drive in hostvars[host]['rotary_available'] %}
+        - /dev/{{ drive.name }}
+{% endfor %}
+{% endif %}
+{% if 'swift_zone' in hostvars[host] %}
+      swift_vars:
+        zone: {{ hostvars[host]['swift_zone'] }}
+        mount_point: /srv
+        drives:
+{% for drive in hostvars[host]['rotary_available'] %}
+          - name: {{ drive.name }}
+            weight: {{ drive.weight }}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% endfor %}

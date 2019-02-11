@@ -1,0 +1,21 @@
+---
+
+#Update package source lists:
+- name: Update all packages to the latest version
+  apt:
+    update_cache:
+    upgrade: dist
+
+- name: Install additional software packages
+  apt:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - aptitude
+    - build-essential
+    - git
+    - ntp
+    - ntpdate
+    - openssh-server
+    - python-dev
+    - sudo

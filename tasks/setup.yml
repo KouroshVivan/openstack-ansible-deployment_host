@@ -1,0 +1,66 @@
+---
+
+- name: Clone OpenStack Ansible repo
+  become: true
+  git:
+    dest: /opt/openstack-ansible
+    force: yes
+    repo: "{{ openstack-ansible_git_url }}"
+    version: "{{ openstack-ansible_git_version }}"
+  register: clone_osa
+  until: clone_osa|success
+  retries: 3
+  delay: 2
+  notify:
+    - bootstrap openstack ansible
+
+- name: Ensure /etc/openstack_deploy exists
+  become: true
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+   - /etc/openstack_deploy
+   - /etc/openstack_deploy/conf.d
+   - /etc/openstack_deploy/env.d
+   - /etc/openstack_deploy/files
+
+- name: Generate OpenStack Ansible conf files
+  become: true
+  template:
+    src: "{{ item }}"
+    dest: "/etc/openstack_deploy/conf.d/{{ item | basename | regex_replace('\\.j2','') }}"
+  with_fileglob:
+    - templates/conf.d/*.j2
+
+- name: Generate OpenStack Ansible env files
+  become: true
+  template:
+    src: "{{ item }}"
+    dest: "/etc/openstack_deploy/env.d/{{ item | basename | regex_replace('\\.j2','') }}"
+  with_fileglob:
+    - templates/env.d/*.j2
+
+- name: Generate osa configurations files
+  become: true
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/openstack_deploy/{{ item }}"
+  with_items:
+    - user_variables.yml
+    - openstack_user_config.yml
+
+- name: Import default user_secret (first time)
+  become: yes
+  copy:
+    dest: "/etc/openstack_deploy/user_secrets.yml"
+    force: no
+    remote_src: True
+    src: "/opt/openstack-ansible/etc/openstack_deploy/user_secrets.yml"
+
+- name: Run password generation script
+  become: yes
+  shell: "/opt/openstack-ansible/scripts/pw-token-gen.py --file /etc/openstack_deploy/user_secrets.yml"
+  register: pw_token_gen
+  changed_when: "'Creating' in pw_token_gen.stdout"

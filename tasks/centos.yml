@@ -1,0 +1,29 @@
+---
+
+- name: Upgrade the system packages and kernel
+  yum:
+    name: '*'
+    state: latest
+
+- name: Install additional software packages for {{ openstack_stable_release }}
+  yum:
+    name: "https://rdoproject.org/repos/openstack-rocky/rdo-release-{{ openstack_stable_release }}.rpm"
+    state: present
+
+- name: Install additional software packages
+  yum:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - git
+    - ntp
+    - ntpdate
+    - openssh-server
+    - python-devel
+    - sudo
+
+- name: Disable firewalld
+  systemd:
+    name: firewalld
+    state: stopped
+    masked: yes

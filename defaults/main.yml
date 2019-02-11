@@ -1,0 +1,7 @@
+---
+# defaults file for openstack-ansible-deployment_host
+
+openstack_stable_release: rocky
+openstack-ansible_git_url: https://git.openstack.org/openstack/openstack-ansible
+#failback: https://github.com/openstack/openstack-ansible.git
+openstack-ansible_git_version: "stable/{{ openstack_stable_release }}"
